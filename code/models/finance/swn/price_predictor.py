@@ -234,6 +234,8 @@ class PricePredictor(object):
 
 
     def _validate(self, steps = 5, epoch=200):
+        if not os.path.exists('results/'):
+            os.makedirs('results/')
         self._model._build_model()
         receptive_field = self.get_receptive_field(self._model, self._config)
         self._config.input_seq_length = receptive_field
@@ -248,23 +250,32 @@ class PricePredictor(object):
         self._model.net.load_state_dict(state['state_dict'])
         
         X = x[:,:receptive_field,:].copy()
-        LL, KLloss, lowerbound = [],[],[]
+        LL, KLloss, lowerbound = [], [], []
         kld_weight = self._config.kld_step
         for i in range(1, epoch):
             kld_weight = self.adjust_kd(i, self._config.kld_epochs, self._config.kld_step, self._config.kld_max)
         print('kld_weight: ', kld_weight)
 
+        d = 1
         for step in range(steps):
             print('step: ', step)
             test_cost, test_nll, test_kld_loss, test_pars = self.evaluate(X[:, step:step+receptive_field, :], y[:, step:step+receptive_field, :],  mask)
-            test_pred = Variable(torch.from_numpy(np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:]))).float()
+            if self._config.loss == 'Gaussian':
+                locs = Variable(torch.from_numpy(np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :]))).float()
+                logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
+                Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
+                test_pred = Dist.sample()
+            else:
+                test_pred = np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :])
             X = np.concatenate([X, test_pred], axis = 1)
             LL.append(test_nll)
             KLloss.append(test_kld_loss)
             lowerbound.append(test_nll - kld_weight*test_kld_loss)
 
-        tars = self.convert(self.compound(self.denorm(y[:,-steps:,1]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
-        preds = self.convert(self.compound(self.denorm(X[:,-steps:,1]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
+        
+
+        tars = self.convert(self.compound(self.denorm(y[:,-steps:,d]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
+        preds = self.convert(self.compound(self.denorm(X[:,-steps:,d]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
 
         plt.plot(tars[:,-1])
         plt.plot(preds[:,-1])
@@ -280,7 +291,11 @@ class PricePredictor(object):
         _, mmd, that = mix_rbf_mmd2_and_ratio(Variable(torch.from_numpy(preds)).float(), 
                                               Variable(torch.from_numpy(tars)).float(), sigma_list)
 
-        f = open('results_'+self._config.model_name+'.txt', 'w')
+        f = open('results/results_'+self._config.model_name+'_'+self._config.backtest_target+'.txt', 'w')
+        f.write('epoch: '+str(epoch)+'\n')
+        f.write('steps '+str(steps)+'\n')
+        f.write('target '+str(self._config.backtest_target)+'\n')
+        f.write('N '+str(np.shape(X)[0])+'\n')
         f.write('MMD: '+str(mmd.item())+'\n')
         f.write('THAT: '+str(that.item())+'\n')
         f.write('kld@1: '+str(np.sum(KLloss[0]))+'\n')
@@ -294,7 +309,7 @@ class PricePredictor(object):
         f.write('LL@1: '+str(np.sum(LL[0]))+'\n')
         f.write('LL@total: '+str(np.sum(LL))+'\n')
         f.close()
-        f = open('results_'+self._config.model_name+'.txt', 'r')
+        f = open('results/results_'+self._config.model_name+'_'+self._config.backtest_target+'.txt', 'r')
         for line in f:
             print(line)
 
@@ -332,7 +347,11 @@ class PricePredictor(object):
         return (compound_returns + 1.0) * seed
 
 
-    def _backtest(self, samples_per_tick=500, view = 1, risk_view=1, epoch=1000, alpha=5):
+    def _backtest(self, samples_per_tick=200, view = 1, risk_view=1, epoch=1000, alpha=5):
+
+        if not os.path.exists('results/'):
+            os.makedirs('results/')
+
         t1 = time.time()
         self._dataset.prepare_data(self._config)
         
@@ -342,27 +361,32 @@ class PricePredictor(object):
         receptive_field = self.get_receptive_field(self._model, self._config)
 
         data, close = self._dataset.get_backtest_set()
+        # check how many ticks we can do before end of data
         ticks_per_run = np.shape(data)[1]-receptive_field-view
 
+        d = 1
+        # check if indexing is correct
+        assert self._config.backtest_target.split('close_')[0] in self._config.features[d]
+        target = close
+
+
         # test if denormalization is correct
-        check = self.convert(self.compound(self.denorm(data[:,1:,0])), close[0])
-        assert np.sum(np.around(close[1:], 1) - np.around(check[0,:], 1)) == 0
+        # test if denormalization is correct
+        check = self.convert(self.compound(self.denorm(data[:,1:,d])), close[0])
+        if np.sum(np.around(close[1:101], 1) - np.around(check[0,:100], 1)) > 0:
+            plt.plot(close[1:101] - check[0,:100])
+            plt.show()
 
         X = data[:, :receptive_field, :]
-
         mask = np.zeros([receptive_field, 1])
         mask[receptive_field-1:, :] = 1
         mask = Variable(torch.from_numpy(mask).float())
-        mask_big = np.zeros([receptive_field, samples_per_tick])
-        mask_big [receptive_field-1:, :] = 1
-        mask_big  = Variable(torch.from_numpy(mask_big).float())
 
         # initial situation
         have_state = False
         actions = np.full((1,ticks_per_run), 'hold')
         transaction_cost = 0.00
-        transaction_cost_ = transaction_cost
-        D = (1+transaction_cost_)/(1-transaction_cost_)
+        D = (1+transaction_cost)/(1-transaction_cost)
         print('Discount factor :' , D)
         var = np.zeros(np.shape(actions))
         es = np.zeros(np.shape(actions))
@@ -375,7 +399,8 @@ class PricePredictor(object):
 
         state = torch.load('saved_models/'+self._config.model_name+'/'+self._config.model_name+str(epoch)+'.pth.tar', map_location='cpu')
         self._model.net.load_state_dict(state['state_dict'])
-        # initial situation
+
+        # our target is closing price, which is the 0th index in data dimensions
         d = 0
         target = close
 
@@ -393,7 +418,7 @@ class PricePredictor(object):
                 torch.manual_seed(sample)
                 # free run the model to predict multiple steps
                 for step in range(view):  
-                    _, _, _,   test_pars = self.evaluate(context_[:, step:, :], context_[:, step:, :], mask)
+                    _, _, _,  test_pars = self.evaluate(context_[:, step:, :], context_[:, step:, :], mask)
                     loc = test_pars[0].detach().numpy()[-1:,:, :]
                     if self._config.loss == 'Gaussian':
                         locs = Variable(torch.from_numpy(np.einsum('ijk->jik',loc))).float()
@@ -405,9 +430,10 @@ class PricePredictor(object):
 
                     context_ = np.concatenate([context_, pred], axis = 1)
                 
+                # denormalize teh scaled log returns back to returns
                 future_returns[:, :, sample] = self.compound(self.denorm(context_[:, receptive_field:, d]), dim=-1)
+                # denormalize the returns back to prices
                 future_prices[:, :, sample] = self.convert(future_returns[:, :, sample], x0 )
-
 
             expected_future = np.mean(future_prices, axis=-1)
             returns = future_returns[0,risk_view-1,:]
@@ -421,11 +447,14 @@ class PricePredictor(object):
             es[:, tick] = expected_shortfall(returns)
             es_unc[:, tick] = unconditional_expected_shortfall(returns)
 
-            nextx = self.denorm(data[:, tick+receptive_field, d])
-            observed_returns[:, tick] = nextx
+            next_return = self.denorm(data[:, tick+receptive_field, d])
+            observed_returns[:, tick] = next_return
+            # if next_return < var[:, tick]:
+            #     plt.scatter(np.ones(np.shape(returns)), returns, c='b')
+            #     plt.axvline(y=var[:, tick], c='r')
+            #     plt.axvline(y=next_return, c='g')
+            #     plt.show()
         
-        
-
             # for each example in the batch, find trading action
             if not have_state:
                 # check when and if there is a profitable sell moment
@@ -437,12 +466,8 @@ class PricePredictor(object):
                         have_state = True
                         actions[0,tick] = 'buy'
                         buying_price = x0
-                        
-        
-
+                        print('buying')
             else:
-               
-               
                 # check if there is a moment when buying a new share is cheaper than keeping this one
                 t_buy = get_next_or_none(tau for tau, m in enumerate(expected_future[0,-1:]) if m < x0)
                 # check if until that moment arrives, there is a better sell moment
@@ -451,10 +476,7 @@ class PricePredictor(object):
                     if (t_buy == 0 or expected_future[0,0:t_buy].max() <= x0):
                         have_state = False
                         actions[0,tick] = 'sell'
-                        print('SSEEEELLLL')
-
-          
-                
+                        print('selling')                
 
             if tick==0:
                 t4 = time.time()
@@ -475,11 +497,11 @@ class PricePredictor(object):
 
         R = []
         P = []
-        roi, profit = compute_roi(close[receptive_field-1:], actions[0,:], transaction_cost, violations[0,:])
+        roi, profit = compute_roi(close[receptive_field-1:], actions[0,:], transaction_cost)
         R.append(roi)
         P.append(profit)
-
-        f = open('backtest_results_'+self._config.model_name+'txt', 'w')
+        run_seed = np.random.rand()
+        f = open('results/backtest_results_'+self._config.model_name+'_'+str(run_seed)+'_'+self._config.backtest_target+'.txt', 'w')
         f.write('runs: '+str(runs)+'\n')
         f.write('ticks_per_run: '+str(ticks_per_run)+'\n')
         f.write('samples_per_tick: '+str(samples_per_tick)+'\n')
@@ -503,7 +525,7 @@ class PricePredictor(object):
         f.write('es conditional predicted: ' +str(np.sum(violations*es) /np.sum(violations))+'\n')
         f.close()
 
-        f = open('backtest_results_'+self._config.model_name+'txt', 'r')
+        f = open('results/backtest_results_'+self._config.model_name+'_'+str(run_seed)+'_'+self._config.backtest_target+'.txt', 'r')
         for line in f:
             print(line)
         f.close()

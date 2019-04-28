@@ -27,14 +27,16 @@ def main(config):
         file_path = config.file_path
         seed = config.seed
         loss = config.loss
+        target = config.target
         config = pickle.load( open( 'saved_models/'+config.model_name+'/config.p', "rb" ))
         config.validate = True
         config.file_path = file_path
         config.output_seq_length = output_len
         config.seed = seed
         config.loss = loss
+        config.backtest_target = 'close_eth'
+        config.target = 'lr_eth'
         print(config)
-
    
 
     t1 = time.time()
@@ -58,8 +60,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Data params
-    parser.add_argument('--file_path', type=str, default='coins/hour/btc_mv_hour.csv', required=False, help="Name of the file that you want to train on")
-    parser.add_argument('--features', type=list, default=['lr_btc', 'lr_ltc', 'lr_eth'], required=False, help="Names of the features to use as input")
+    parser.add_argument('--file_path', type=str, default='coins/hour/coins_mv_hour.csv', required=False, help="Name of the file that you want to train on")
+    parser.add_argument('--features', type=list, default=['lr_btc'], required=False, help="Names of the features to use as input")
     parser.add_argument('--target', type=str, default='lr_btc', required=False, help="Name of the features to use as target")
     parser.add_argument('--normalize', type=str, default='minmax', required=False, help="If to normalize")
     parser.add_argument('--test_size', type=float, default=0.1, help='fraction of the data, between 0.1 and 0.9')

@@ -419,7 +419,7 @@ class PricePredictor(object):
         return (compound_returns + 1.0) * seed
 
 
-    def _backtest(self, samples_per_tick=500, view = 1, risk_view= 1, epoch=1000, alpha=5):
+    def _backtest(self, samples_per_tick=5, view = 1, risk_view= 1, epoch=1000, alpha=5):
         t1 = time.time()
         self._dataset.prepare_data(self._config)
         
@@ -429,7 +429,7 @@ class PricePredictor(object):
         receptive_field = self.get_receptive_field(self._model, self._config)
 
         data, close = self._dataset.get_backtest_set()
-        ticks_per_run = np.shape(data)[1]-receptive_field-view
+        ticks_per_run = np.shape(data)[1]-receptive_field-view-800
 
         # test if denormalization is correct
         check = self.convert(self.compound(self.denorm(data[:,1:,0])), close[0])
@@ -480,7 +480,7 @@ class PricePredictor(object):
                 torch.manual_seed(sample)
                 # free run the model to predict multiple steps
                 for step in range(view):  
-                    _, _,  test_pars = self.evaluate(context_[:, step:, :], context_[:, step:, :], mask, 1, mmd=False)
+                    _, _,  test_pars = self.evaluate(context_[:, step:, :], data[:, tick+step:tick+step+receptive_field, :], mask, 1, mmd=False)
                     loc = test_pars.detach().numpy()[-1:,:, :]
                     pred = torch.from_numpy(np.einsum('ijk->jik',loc))
 
@@ -502,8 +502,13 @@ class PricePredictor(object):
             es[:, tick] = expected_shortfall(returns)
             es_unc[:, tick] = unconditional_expected_shortfall(returns)
 
-            nextx = self.denorm(data[:, tick+receptive_field, d])
-            observed_returns[:, tick] = nextx
+            next_return = self.denorm(data[:, tick+receptive_field, d])
+            observed_returns[:, tick] = next_return
+            # if next_return < var[:, tick]:
+            #     plt.scatter(np.ones(np.shape(returns)), returns, c='b')
+            #     plt.axhline(var[:, tick], c='r')
+            #     plt.axhline(next_return, c='g')
+            #     plt.show()
         
         
 
@@ -534,8 +539,11 @@ class PricePredictor(object):
                 t4 = time.time()
                 print('trading done in :', str(t4-t3), 'sec')
 
-        # observed_returns = self.denorm(Y[:, receptive_field-1:receptive_field+ticks_per_run-1, 0])
-        violations = observed_returns-var
+        observed_returns_ = self.denorm(data[:, receptive_field:receptive_field+ticks_per_run, 0])
+        assert np.sum(observed_returns - observed_returns_) == 0
+
+        # when observed return is lower than value at risk, it is a violation 
+        violations = observed_returns - var
         np.putmask(violations, violations>=0, np.ones(np.shape(observed_returns)))
         np.putmask(violations, violations<0, 2*np.ones(np.shape(observed_returns)))
         violations -= 1
@@ -547,11 +555,9 @@ class PricePredictor(object):
         z2 = z2_score(observed_returns, violations, es_unc, T1+T0, alpha/100.)
         z3 = z2_score(observed_returns, violations, es, T1+T0, alpha/100.)
 
-        R = []
-        P = []
+        
         roi, profit = compute_roi(close[receptive_field-1:], actions[0,:], transaction_cost, violations[0,:])
-        R.append(roi)
-        P.append(profit)
+
 
         run_seed = np.random.rand()
         if not os.path.exists('results/'):
@@ -565,8 +571,8 @@ class PricePredictor(object):
         f.write('transaction_cost: '+str(transaction_cost)+'\n')
         f.write('T1: '+str(T1)+'\n')
         f.write('T0: '+str(T0)+'\n')
-        f.write('ROI: '+str(np.sum(R))+'\n')
-        f.write('profit: '+str(np.sum(P))+'\n')
+        f.write('ROI: '+str(roi)+'\n')
+        f.write('profit: '+str(profit)+'\n')
         f.write('pihat: '+str(pihat)+'\n')
         f.write('lr: '+str(lr)+'\n')
         f.write('z1: '+str(z1)+'\n')

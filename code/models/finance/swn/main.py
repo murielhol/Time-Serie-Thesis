@@ -32,6 +32,8 @@ def main(config):
         config.loss = loss
         config.num_layers = l
         config.num_stochastic_layers = sl
+        config.backtest_target = 'close_ltc'
+        config.target = 'lr_ltc'
         print(config)
 
 
@@ -56,13 +58,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Data params
-    parser.add_argument('--file_path', type=str, default='coins/hour/btc_mv_hour.csv', required=False, help="Name of the file that you want to train on")
+    parser.add_argument('--file_path', type=str, default='coins/hour/coins_mv_hour.csv', required=False, help="Name of the file that you want to train on")
     parser.add_argument('--features', type=list, default=['lr_btc', 'lr_ltc', 'lr_eth'], required=False, help="Names of the features to use as input")
 
     parser.add_argument('--target', type=str, default='price', required=False, help="Name of the features to use as target")
     parser.add_argument('--normalize', type=str, default='none', required=False, help="If to normalize")
     parser.add_argument('--test_size', type=float, default=0.1, help='fraction of the data, between 0.1 and 0.9')
-    parser.add_argument('--model_name', type=str, default='btc_mv_swn_l2_final', help='Unique name of the model')
+    parser.add_argument('--model_name', type=str, default='btc_mv_swn_l1_final', help='Unique name of the model')
 
     # Model params
     parser.add_argument('--input_seq_length', type=int, default=32, help='Length of an input sequence')
@@ -70,7 +72,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_hidden', type=int, default=128, help='Number of hidden units in the LSTM')
     parser.add_argument('--num_layers', type=int, default=3, help='Number of layers in the model')
     parser.add_argument('--num_stochastic_layers', type=int, default=2, help='Number of stochastic layers in the model')
-    parser.add_argument('--loss', type=str, default='MSE', help='loss function generator')
+    parser.add_argument('--loss', type=str, default='L1', help='loss function generator')
 
 
     # Training params

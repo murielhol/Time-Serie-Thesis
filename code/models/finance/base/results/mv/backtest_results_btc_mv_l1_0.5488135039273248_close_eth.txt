@@ -1,0 +1,28 @@
+runs: 1
+ticks_per_run: 1204
+samples_per_tick: 1
+view: 1
+risk_view: 1
+transaction_cost: 0.0
+T1: 381.0
+T0: 823.0
+ROI: 0.4481333580116167
+profit: 149.74
+pihat: 0.3164451827242525
+lr: 864.1974460790625
+z1: nan
+z2: nan
+z3: nan
+es unconditional observed: -0.0
+es unconditional expected: 0.0
+es unconditional predicted: 0.0
+es conditional observed: -0.0
+es conditional expected: nan
+es conditional predicted: nan
+
+Dummy baselines: 
+ma2: -0.639028332595234, -232.63999999999942
+ma5: -0.42846373740914867, -163.40999999999985
+ma10: -0.43981590868146314, -167.17999999999978
+ma20: -0.29072044605717945, -112.61000000000024
+ma50: -0.29072044605717945, -93.25999999999999

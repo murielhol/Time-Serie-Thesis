@@ -59,7 +59,7 @@ def get_next_or_none(iterable):
     except StopIteration:  # there is no tsell
         return None
 
-def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_cost, violations) -> float:
+def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_cost) -> float:
     """
     Given a timeseries and a list of events, compute the return on investment
     Note: only buys once every tick, but sells everything within 1 tick
@@ -75,8 +75,8 @@ def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_
     sold = 0
     roi = []
     profit = 0
-    plt.figure()
-    plt.plot(timeseries, alpha=0.5, c='b')
+    # plt.figure()
+    # plt.plot(timeseries, alpha=0.5, c='b')
     P = []
     R = []
     # for i in range(len(violations)):
@@ -102,13 +102,13 @@ def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_
     if sold == 0 and bought>0:
         profit += bought
 
-    plt.show()
-    plt.figure('profit')
-    plt.plot(P)
-    plt.show()
-    plt.figure('ROI')
-    plt.plot(P)
-    plt.show()
+    # plt.show()
+    # plt.figure('profit')
+    # plt.plot(P)
+    # plt.show()
+    # plt.figure('ROI')
+    # plt.plot(P)
+    # plt.show()
 
     return np.sum(roi), profit
 

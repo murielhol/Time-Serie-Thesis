@@ -40,8 +40,8 @@ def main(config):
     model = PricePredictor(config, dataset)
 
     if config.validate:
-        # model._validate(steps = config.output_seq_length, epoch=350)
-        model._backtest( epoch=350)
+        # model._validate(steps = config.output_seq_length, epoch=400)
+        model._backtest( epoch=300)
 
         # model._make_figs(steps = config.output_seq_length, epoch=95)
     else:
@@ -55,7 +55,7 @@ if __name__ == "__main__":
 
     # Data params
     parser.add_argument('--file_path', type=str, default='coins/hour/btc_mv_hour.csv', required=False, help="Name of the file that you want to train on")
-    parser.add_argument('--model_name', type=str, default='btc_mv_wgan_alone', help='Unique name of the model')
+    parser.add_argument('--model_name', type=str, default='btc_mv_wgan_team_5', help='Unique name of the model')
 
     # Model params
     parser.add_argument('--input_seq_length', type=int, default=32, help='Length of an input sequence')
