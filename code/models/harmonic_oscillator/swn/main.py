@@ -25,10 +25,16 @@ def main(config):
     
     if config.validate:
         output_len = config.output_seq_length
+        l = config.num_layers
+        loss = config.loss
+        sl = config.num_stochastic_layers
         config = pickle.load( open( 'saved_models/'+config.model_name+'/config.p', "rb" ))
         config.validate = True
         config.simulate = False
         config.output_seq_length = output_len
+        config.num_layers = l
+        config.num_stochastic_layers = sl
+        config.loss = loss
         print(config)
 
     t1 = time.time()
@@ -41,7 +47,8 @@ def main(config):
     model = PricePredictor(config, dataset)
     if config.validate:
         # model._make_figs(steps = config.output_seq_length, epoch=200)
-        model._validate(steps = config.output_seq_length, epoch=200)
+        # model._validate(steps = config.output_seq_length, epoch=160)
+        model._backtest(epoch=160)
     else:
         model._train()
 
@@ -58,10 +65,12 @@ if __name__ == "__main__":
 
     # Model params
     parser.add_argument('--input_seq_length', type=int, default=64, help='Length of an input sequence')
-    parser.add_argument('--output_seq_length', type=int, default=10, help='Length of the output sequence')
+    parser.add_argument('--output_seq_length', type=int, default=97, help='Length of the output sequence')
     parser.add_argument('--num_hidden', type=int, default=128, help='Number of hidden units in the LSTM')
     parser.add_argument('--embedding', type=int, default=128, help='Number of hidden units in the LSTM')
-    parser.add_argument('--num_layers', type=int, default=5, help='Number of LSTM layers in the model')
+    parser.add_argument('--num_layers', type=int, default=4, help='Number of LSTM layers in the model')
+    parser.add_argument('--num_stochastic_layers', type=int, default=2, help='Number of LSTM layers in the model')
+    parser.add_argument('--loss', type=str, default='Gaussian', help='Number of LSTM layers in the model')
 
     # Training params
     parser.add_argument('--batch_size', type=int, default=64, help='Number of examples to process in a batch')

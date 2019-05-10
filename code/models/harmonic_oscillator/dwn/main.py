@@ -37,7 +37,7 @@ def main(config):
     model = PricePredictor(config, dataset)
 
     if config.validate:
-        model._validate(steps = config.output_seq_length, epoch=115)
+        model._validate(steps = config.output_seq_length, epoch=250)
         # model._make_figs(steps = config.output_seq_length, epoch=95)
     if config.backtest:
         model._backtest2( epoch=40)
@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     # Data params
     parser.add_argument('--file_path', type=str, default='ho_um', required=False, help="Name of the file that you want to train on")
-    parser.add_argument('--model_name', type=str, default='wgan_ho_team_final', help='Unique name of the model')
+    parser.add_argument('--model_name', type=str, default='wgan_ho_final_team', help='Unique name of the model')
 
     # Model params
     parser.add_argument('--input_seq_length', type=int, default=64, help='Length of an input sequence')

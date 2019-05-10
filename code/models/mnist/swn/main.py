@@ -45,7 +45,7 @@ def main(config):
         model._make_figs2(epoch=70)
 
     elif config.tsne:
-        model._tsne_2(epoch=70)
+        model._tsne(epoch=70)
     else:
         model._train()
 
@@ -56,7 +56,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Data params
-    
     parser.add_argument('--file_path', type=str, default='mnist', required=False, help="Name of the file that you want to train on")
     parser.add_argument('--features', type=list, default=["price"], required=False, help="Names of the features to use as input")
     parser.add_argument('--target', type=str, default='price', required=False, help="Name of the features to use as target")

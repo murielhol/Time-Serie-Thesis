@@ -344,7 +344,7 @@ class PricePredictor(object):
         MSE, KLloss, lowerbound = [],[],[]
         kld_weight = self._config.kld_step
         for i in range(1, epoch):
-            kld_weight = self.adjust_kd(i, self._config.kld_epochs, self._config.kld_step, 0.1)
+            kld_weight = self.adjust_kd(i, self._config.kld_epochs, self._config.kld_step, self._config.kld_max)
         print('KL weight: ', kld_weight)
         for step in range(28 - receptive_field):
             # print('step: ', step)
@@ -361,9 +361,17 @@ class PricePredictor(object):
             KLloss.append(kl.item())
             lowerbound.append(nll.item() - kld_weight * kl.item())
 
-        for i in range(0,100, 5):
-            plt.imshow(X[i,:,:])
-            plt.show()
+
+        pixels_real = np.reshape(np.around(0.5*(1+y[:,16:,:]),5), (1, np.shape(y)[0]*28*12))
+        pixels_fake = np.reshape(np.around(0.5*(1+X[:,16:,:]),5), (1, np.shape(X)[0]*28*12))
+        a = np.histogram(pixels_real, bins=50, range = (0,1), density=True)
+        b =  np.histogram(pixels_fake, bins=50, range = (0,1), density=True)
+        plt.bar(np.arange(0+1/len(a[0]), 1+1/len(a[0]), 1/len(a[0])), a[0]-b[0], width = 1/len(a[0])*0.99)
+        print(a[0]-b[0])
+        plt.ylim(-2, 4)
+        plt.savefig('images/mnist_dswn_pixeldist.pdf')
+        plt.show()
+
 
         sigma_list = [Variable(torch.from_numpy(np.array(s)).float(), requires_grad=False) for s in np.arange(5,10,0.5)]
         _, mmd, that = mix_rbf_mmd2_and_ratio(torch.reshape(Variable(torch.from_numpy(X)).float(), (np.shape(x)[0], np.shape(x)[1]*28)), 

@@ -15,7 +15,7 @@ class Model(object):
 
         self._config = config
         self.input_dim = 28
-        self.embed_dim = config.embedding
+        self.embed_dim = config.num_hidden
         self.z_dim = config.num_hidden
         self.learning_rate = config.learning_rate
 

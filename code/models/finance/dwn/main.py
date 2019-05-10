@@ -19,11 +19,17 @@ def main(config):
         output_len = config.output_seq_length
         fp = config.file_path
         l = config.num_layers
+        seed = config.seed
+        loss = config.loss
         config = pickle.load( open( 'saved_models/'+config.model_name+'/config.p', "rb" ))
         config.validate = True
         config.output_seq_length = output_len
         config.num_layers = l
+        config.seed = seed
         config.file_path = fp
+        config.loss = loss
+        config.backtest_target = 'close_btc'
+        config.target = 'lr_btc'
         print(config)
     
     elif config.backtest:
@@ -40,8 +46,8 @@ def main(config):
     model = PricePredictor(config, dataset)
 
     if config.validate:
-        # model._validate(steps = config.output_seq_length, epoch=400)
-        model._backtest( epoch=300)
+        # model._validate(steps = config.output_seq_length, epoch=500)
+        model._backtest( epoch=500)
 
         # model._make_figs(steps = config.output_seq_length, epoch=95)
     else:
@@ -55,7 +61,7 @@ if __name__ == "__main__":
 
     # Data params
     parser.add_argument('--file_path', type=str, default='coins/hour/btc_mv_hour.csv', required=False, help="Name of the file that you want to train on")
-    parser.add_argument('--model_name', type=str, default='btc_mv_wgan_team_5', help='Unique name of the model')
+    parser.add_argument('--model_name', type=str, default='btc_mv_wgan_alone_5', help='Unique name of the model')
 
     # Model params
     parser.add_argument('--input_seq_length', type=int, default=32, help='Length of an input sequence')
@@ -72,6 +78,8 @@ if __name__ == "__main__":
     parser.add_argument('--tensorboard', default=False, help='If to use tensorboard')
     parser.add_argument('--critic_updates', type=int, default=10, help='')
     parser.add_argument('--gp', type=float, default=0.1, help='')
+    parser.add_argument('--seed', default=False, help='random seed')
+
 
     # Misc params
     parser.add_argument('--validate', default=True, help='If only want to validate the stored model')

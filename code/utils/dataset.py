@@ -53,12 +53,7 @@ class Dataset(object):
 
         print('train_size: ', train_size, 'test_size: ', test_size)
         
-        try:
-            self.val_target = self._df.close.values[train_size:]
-        except:
-            self.val_target = self._df.close_btc.values[train_size:]
-            
-
+        self.val_target = self._df[config.backtest_target].values[train_size+test_size:]
 
         self._df = self._df[list(config.features)]
         print('skip:', skip)
@@ -77,7 +72,7 @@ class Dataset(object):
 
         self.train = self._df.copy().iloc[:train_size, :]
         self.test = self._df.copy().iloc[train_size:train_size+test_size, :]
-        self.val = self._df.copy().iloc[train_size:, :]
+        self.val = self._df.copy().iloc[train_size+test_size:, :]
 
         self.val_series = np.expand_dims(self.val.copy(), 0)
 

@@ -256,7 +256,7 @@ class PricePredictor(object):
             kld_weight = self.adjust_kd(i, self._config.kld_epochs, self._config.kld_step, self._config.kld_max)
         print('kld_weight: ', kld_weight)
 
-        d = 1
+        d = 0
         for step in range(steps):
             print('step: ', step)
             test_cost, test_nll, test_kld_loss, test_pars = self.evaluate(X[:, step:step+receptive_field, :], y[:, step:step+receptive_field, :],  mask)
@@ -347,7 +347,7 @@ class PricePredictor(object):
         return (compound_returns + 1.0) * seed
 
 
-    def _backtest(self, samples_per_tick=200, view = 1, risk_view=1, epoch=1000, alpha=5):
+    def _backtest(self, samples_per_tick=1000, view = 1, risk_view=1, epoch=1000, alpha=5):
 
         if not os.path.exists('results/'):
             os.makedirs('results/')
@@ -364,10 +364,10 @@ class PricePredictor(object):
         # check how many ticks we can do before end of data
         ticks_per_run = np.shape(data)[1]-receptive_field-view
 
-        d = 1
-        # check if indexing is correct
-        assert self._config.backtest_target.split('close_')[0] in self._config.features[d]
-        target = close
+        d = 0
+        # # check if indexing is correct
+        # assert self._config.backtest_target.split('close_')[0] in self._config.features[d]
+        # target = close
 
 
         # test if denormalization is correct
@@ -401,7 +401,6 @@ class PricePredictor(object):
         self._model.net.load_state_dict(state['state_dict'])
 
         # our target is closing price, which is the 0th index in data dimensions
-        d = 0
         target = close
 
         for tick in range(ticks_per_run):
@@ -420,7 +419,7 @@ class PricePredictor(object):
                 for step in range(view):  
                     _, _, _,  test_pars = self.evaluate(context_[:, step:, :], context_[:, step:, :], mask)
                     loc = test_pars[0].detach().numpy()[-1:,:, :]
-                    if self._config.loss == 'Gaussian':
+                    if False:#self._config.loss == 'Gaussian':
                         locs = Variable(torch.from_numpy(np.einsum('ijk->jik',loc))).float()
                         logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
                         Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
@@ -530,7 +529,55 @@ class PricePredictor(object):
             print(line)
         f.close()
 
+    def _make_figs(self, steps = 5, epoch=200, i=0):
+        if not os.path.exists('images/'):
+            os.makedirs('images/')
+        self._model._build_model()
+        receptive_field = self.get_receptive_field(self._model, self._config)
+        self._config.input_seq_length = receptive_field
+        self._dataset.prepare_data(self._config)
+        x, y, target = self._dataset.get_validation_set()
+        x=x[:10, :,:]
+        y=y[:10, :,:]
+
+        mask = np.zeros([receptive_field, np.shape(x)[0]])
+        mask[receptive_field-1:, :] = 1
+        mask = Variable(torch.from_numpy(mask).float())
+
+        state = torch.load('saved_models/'+self._config.model_name+'/'+self._config.model_name+str(epoch)+'.pth.tar', map_location='cpu')
+        self._model.net.load_state_dict(state['state_dict'])
+        
+        d = 0
+        for seed in range(100):
+            X = x[:,:receptive_field,:].copy()
+            print('roll-out nr: ', seed)
+            for step in range(steps):
+                np.random.seed(seed)
+                torch.manual_seed(seed)
+
+                _, _, _, test_pars = self.evaluate(X[:, step:step+receptive_field, :], y[:, step:step+receptive_field, :],  mask)
+                if self._config.loss == 'Gaussian':
+                    locs = Variable(torch.from_numpy(np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :]))).float()
+                    logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
+                    Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
+                    test_pred = Dist.sample()
+                else:
+                    test_pred = np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :])
+                X = np.concatenate([X, test_pred], axis = 1)
+
+            plt.plot(X[i,-steps-1:,d], c='b', alpha=0.5)
+        plt.plot(y[i,-steps-1:,d])
+        plt.show()
+        boe
+    #         preds = self.convert(self.compound(self.denorm(X[:,-steps-1:,d]), dim=1), np.expand_dims(target[receptive_field-2:receptive_field-2+np.shape(X)[0]], 1))
+    #         plt.plot(preds[i,:], alpha=0.3, c='b')
+
+    #     tars = self.convert(self.compound(self.denorm(y[:,-steps-1:,d]), dim=1), np.expand_dims(target[receptive_field-2:receptive_field-2+np.shape(X)[0]], 1))
+    #     plt.plot(tars[i,:], c='r')
+    #     plt.show()
+
+
     
     
   
-    
+    # 

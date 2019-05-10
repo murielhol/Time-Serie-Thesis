@@ -23,6 +23,7 @@ import seaborn as sns
 from model import Model
 
 from models.harmonic_oscillator.mmd import  mix_rbf_mmd2_and_ratio
+from models.harmonic_oscillator.trading_utils import *
 
 
 
@@ -238,6 +239,8 @@ class PricePredictor(object):
         self._config.input_seq_length = receptive_field
         self._dataset.prepare_data(self._config)
         x, y = self._dataset.get_validation_set()
+        # x = x[:2,:,:]
+        # y= y[:2,:,:]
 
         mask = np.zeros([receptive_field, np.shape(x)[0]])
         mask[receptive_field-1:, :] = 1
@@ -251,38 +254,41 @@ class PricePredictor(object):
             print('step: ', step)
             print(np.shape(x))
             test_cost, test_nll, test_kld_loss, test_pars = self.evaluate(x[:, step:step+receptive_field, :], y[:, step:step+receptive_field, :], mask)
-            
-            locs = Variable(torch.from_numpy(np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :]))).float()
-            logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
-            Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
-            test_pred = Dist.sample()
-            
-            # test_pred = np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :])
+            if self._config.loss == 'Gaussian':
+                locs = Variable(torch.from_numpy(np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :]))).float()
+                logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
+                Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
+                test_pred = Dist.sample()
+                del Dist
+                del locs
+                del logvars
+            else:
+                test_pred = np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :])
             x = np.concatenate([x, test_pred], axis = 1)
             print(np.shape(x))
             LL.append(test_nll)
             KLloss.append(test_kld_loss)
-            lowerbound.append(test_cost)
+            lowerbound.append(test_nll-1*test_kld_loss)
 
         preds = x[:, -steps:, 0]
         tars = y[:,-steps:,0]
+
+        MSE = np.mean((preds-tars)**2, axis=0)
+        print('MSE: ')
+        print(MSE)
+        print(np.sum(MSE))
+        print('--------------------------------')
 
         sigma_list = [Variable(torch.from_numpy(np.array(s)).float(), requires_grad=False) for s in [0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]]
         _, mmd, that = mix_rbf_mmd2_and_ratio(Variable(torch.from_numpy(preds)).float(), 
                                               Variable(torch.from_numpy(tars)).float(), sigma_list)
 
         
-        print('KLloss@1', KLloss[0], 'KLloss', np.sum(KLloss))
-        print('LL@1', LL[0],' LL', np.sum(LL))
-        print('lowerbound@1', lowerbound[0], 'lowerbound', np.sum(lowerbound))
-        print('MMD : ', mmd.item(),  ' THAT: ', that.item())
-
-        print(np.shape(preds-tars))
-        MSE = np.mean(np.power(preds - tars, 2), axis=0)
-        print('MSE@1', MSE[0],' MSE', np.sum(MSE))
-        
-        print('LL total: ', np.sum(LL))
-        f = open('results_'+self._config.model_name+'.txt', 'w')
+        if not os.path.exists('results/'):
+            os.makedirs('results/')
+        f = open('results/results_'+self._config.model_name+'.txt', 'w')
+        f.write('epoch: '+str(epoch)+'\n')
+        f.write('steps: '+str(steps)+'\n')
         f.write('MMD: '+str(mmd.item())+'\n')
         f.write('THAT: '+str(that.item())+'\n')
         f.write('LL1: '+str(LL[0])+'\n')
@@ -294,6 +300,9 @@ class PricePredictor(object):
         f.write('KLloss@1: '+str(KLloss[0])+'\n')
         f.write('ELBO@1: '+str(lowerbound[0])+'\n')
         f.close()
+        f = open('results/results_'+self._config.model_name+'.txt', 'r')
+        for line in f:
+            print(line)
 
     def _make_figs(self, steps = 5, epoch=500):
 
@@ -359,3 +368,164 @@ class PricePredictor(object):
         plt.show()
 
         df.to_csv('images/wn_gauss_prediction.csv')
+
+
+    def _backtest(self, samples_per_tick=200, view = 1, risk_view=1, epoch=1000, alpha=5):
+        t1 = time.time()
+        self._dataset.prepare_data(self._config)
+        _, y = self._dataset.get_validation_set()
+        # something I have to because of coding decision in utils
+
+        x = y[:100, :,:]
+        y = y[1:101, :,:]
+
+
+        bs = np.shape(x)[0]
+        self._config.batch_size = bs
+        runs = bs
+        self._model._build_model()
+        receptive_field = self.get_receptive_field(self._model, self._config)
+        
+        ticks_per_run = np.shape(x)[1] - (receptive_field + view)
+
+
+        mask = np.zeros([receptive_field, np.shape(x)[0]])
+        mask[receptive_field-1:, :] = 1
+        mask = Variable(torch.from_numpy(mask).float())
+        
+        # initial situation
+        have_state = np.full((bs), False)
+
+        actions = np.full((bs,ticks_per_run), 'hold')
+        transaction_cost = 0.00
+        D = (1+transaction_cost)/(1-transaction_cost)
+        print('Discount factor :' , D)
+        var = np.zeros(np.shape(actions))
+        es = np.zeros(np.shape(actions))
+        es_unc = np.zeros(np.shape(actions))
+        observed_prices = np.zeros(np.shape(actions))
+        t2 = time.time()
+        print('init done in :', str(t2-t1), 'sec')
+
+        state = torch.load('saved_models/'+self._config.model_name+'/'+self._config.model_name+str(epoch)+'.pth.tar', map_location='cpu')
+        self._model.net.load_state_dict(state['state_dict'])
+
+        d = 0
+        for tick in range(ticks_per_run):
+            x0 = x[:, tick+receptive_field-1, 0]
+            context  = x[:, tick:tick+receptive_field,:]
+            assert (np.sum(np.subtract(x0, context[:,-1, 0]))) == 0
+            print('tick: ', str(tick) , '/', str(ticks_per_run))
+            # fill this with sampled futures
+            future_prices = np.zeros([bs, view, samples_per_tick])
+
+            for sample in range(samples_per_tick):
+                context_ = context.copy()
+                np.random.seed(sample)
+                torch.manual_seed(sample)
+                # free run the model to predict multiple steps
+                for step in range(view):  
+                    _, _, _, test_pars = self.evaluate(context_[:, step:, :], context_[:, step:, :], mask)
+                    loc = test_pars[0].detach().numpy()[-1:,:, :]
+                    if self._config.loss == 'Gaussian':
+                        locs = Variable(torch.from_numpy(np.einsum('ijk->jik',loc))).float()
+                        logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
+                        Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
+                        pred = Dist.sample()
+                        del Dist
+                        del locs
+                        del logvars
+                    else:
+                        pred = torch.from_numpy(np.einsum('ijk->jik',loc))
+                    context_ = np.concatenate([context_, pred], axis = 1)
+                
+                future_prices[:, :, sample] = context_[:, receptive_field:, d]
+
+            expected_future = np.mean(future_prices, axis=-1)
+            
+            var[:, tick] = value_at_risk(future_prices[:, risk_view-1, :])
+            es[:, tick] = expected_shortfall(future_prices[:, risk_view-1, :])
+            es_unc[:, tick] = unconditional_expected_shortfall(future_prices[:, risk_view-1, :])
+
+            next_price = x[:, tick+receptive_field, d]
+            observed_prices[:, tick] = next_price
+            # if next_return < var[:, tick]:
+            #     plt.scatter(np.ones(np.shape(returns)), returns, c='b')
+            #     plt.axhline(var[:, tick], c='r')
+            #     plt.axhline(next_return, c='g')
+            #     plt.show()
+        
+        
+            for run in range(runs):
+                # for each example in the batch, find trading action
+                if not have_state[run]:
+                    # check when and if there is a profitable sell moment
+                    t_sell = get_next_or_none(tau for tau, m in enumerate(expected_future[run,:]) if m > x0[run]*D)
+
+                    if t_sell is not None:
+                        # check if until that sell moment arrives, there is a better buy moment
+                        if (t_sell == 0 or expected_future[run,0:t_sell].min() >= x0[run]):  
+                            have_state[run] = True
+                            actions[run,tick] = 'buy'
+                            buying_price = x0[run]
+                            # plt.plot(expected_future[run,:])
+                            # plt.axhline(next_price[run])
+                            # plt.show()
+                else:
+                    # check if there is a moment when buying a new share is cheaper than keeping this one
+                    t_buy = get_next_or_none(tau for tau, m in enumerate(expected_future[run,:]) if m < x0[run])
+                    # check if until that moment arrives, there is a better sell moment
+
+                    if t_buy is not None:
+                        if (t_buy == 0 or expected_future[run,0:t_buy].max() <= x0[run]):
+                            have_state[run] = False
+                            actions[run,tick] = 'sell'
+
+                
+
+        # observed_returns = self.denorm(Y[:, receptive_field-1:receptive_field+ticks_per_run-1, 0])
+        violations = observed_prices-var
+        np.putmask(violations, violations>=0, np.ones(np.shape(observed_prices)))
+        np.putmask(violations, violations<0, 2*np.ones(np.shape(observed_prices)))
+        violations -= 1
+        T1 = np.sum(violations)
+        T0 = (runs*ticks_per_run)-T1
+        pihat = T1/(T0+T1)
+        lr = likelihood_ratio(pihat, alpha/100., T1, T0)
+        ratio = np.sum(violations*observed_prices / es)
+
+        R = []
+        P = []
+        for run in range(runs):
+            roi, profit = compute_roi(x[run,receptive_field-1:,d], actions[run,:], transaction_cost)
+            R.append(roi)
+            P.append(profit)
+
+        run_seed = np.random.rand()
+        f = open('backtest_results_'+self._config.model_name+'_'+str(run_seed)+'.txt', 'w')
+        f.write('epoch: '+str(epoch)+'\n')
+        f.write('runs: '+str(runs)+'\n')
+        f.write('ticks_per_run: '+str(ticks_per_run)+'\n')
+        f.write('samples_per_tick: '+str(samples_per_tick)+'\n')
+        f.write('view: '+str(view)+'\n')
+        f.write('risk_view: '+str(risk_view)+'\n')
+        f.write('transaction_cost: '+str(transaction_cost)+'\n')
+        f.write('T1: '+str(T1)+'\n')
+        f.write('T0: '+str(T0)+'\n')
+        f.write('ROI: '+str(np.sum(R))+'\n')
+        f.write('profit: '+str(np.sum(P))+'\n')
+        f.write('pihat: '+str(pihat)+'\n')
+        f.write('lr: '+str(lr)+'\n')
+        f.write('ratio: '+str(ratio)+'\n')
+        f.write('es unconditional observed: ' +str(-1*np.mean(violations*observed_prices /(alpha/100.)))+'\n')
+        f.write('es unconditional expected: ' +str(np.mean(es_unc))+'\n')
+        f.write('es unconditional predicted: ' +str(np.mean(es_unc*violations /(alpha/100.)))+'\n')
+        f.write('es conditional observed: ' +str(-1*np.sum(violations*observed_prices) /np.sum(violations))+'\n')
+        f.write('es conditional expected: ' +str(np.mean(es))+'\n')
+        f.write('es conditional predicted: ' +str(np.sum(violations*es) /np.sum(violations))+'\n')
+        f.close()
+
+        f = open('backtest_results_'+self._config.model_name+'_'+str(run_seed)+'.txt', 'r')
+        for line in f:
+            print(line)
+        f.close()

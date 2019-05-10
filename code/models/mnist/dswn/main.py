@@ -41,8 +41,8 @@ def main(config):
 
     model = PricePredictor(config, dataset)
     if config.validate:
-        # model._validate( epoch=130)
-        model._make_figs2(epoch=130)
+        model._validate( epoch=80)
+        model._make_figs(epoch=80)
     
     else:
         model._train()
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     # Data params
     # examples: 'synthetic/synthetic.data' 'grouped/15sec/BTCUSD.csv' 'adding'
     parser.add_argument('--file_path', type=str, default='mnist', required=False, help="Name of the file that you want to train on")
-    parser.add_argument('--model_name', type=str, default='vaegan_mnist_team', help='Unique name of the model')
+    parser.add_argument('--model_name', type=str, default='vaegan_mnist_f', help='Unique name of the model')
 
     # Model params
     parser.add_argument('--num_hidden', type=int, default=128, help='Number of hidden units in the LSTM')

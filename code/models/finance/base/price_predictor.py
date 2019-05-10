@@ -211,7 +211,7 @@ class PricePredictor(object):
         for step in range(steps):
             # print('step: ', step)
             test_cost, test_pars = self.evaluate(X[:, step:step+receptive_field, :], y[:, step:step+receptive_field, :], mask_gen)
-            if False:#self._config.loss == 'Gaussian':
+            if self._config.loss == 'Gaussian':
                 locs = Variable(torch.from_numpy(np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :]))).float()
                 logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
                 Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
@@ -223,15 +223,16 @@ class PricePredictor(object):
             LL.append(test_cost)
 
 
-        d = 1
+        d = 0
 
         # from log returns to returns
         Yreturns = self.compound(self.denorm(y[:,-steps:,d]), dim=1) 
         Xreturns = self.compound(self.denorm(X[:,-steps:,d]), dim=1)
 
-        plt.plot(Yreturns[:,-1])
-        plt.plot(Xreturns[:,-1])
-        plt.show()
+        # for i in range(0, 200, 20):
+        #     plt.plot(Yreturns[i,:])
+        #     plt.plot(Xreturns[i,:])
+        #     plt.show()
 
         # from returns to dollar
         tars = self.convert(Yreturns, np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
@@ -306,7 +307,7 @@ class PricePredictor(object):
         return (compound_returns + 1.0) * seed
 
 
-    def _backtest(self, samples_per_tick=200, view = 1, risk_view=1, epoch=1000, alpha=5):
+    def _backtest(self, samples_per_tick=500, view = 1, risk_view=1, epoch=1000, alpha=5):
         t1 = time.time()
         self._dataset.prepare_data(self._config)
         
@@ -318,11 +319,10 @@ class PricePredictor(object):
         data, close = self._dataset.get_backtest_set()
         ticks_per_run = np.shape(data)[1]-receptive_field-view
 
-        d = 2
+        d = 0
         # check if indexing is correct
-        assert self._config.backtest_target.split('close_')[0] in self._config.features[d]
+        # assert self._config.backtest_target.split('close_')[0] in self._config.features[d]
         target = close
-
 
         # test if denormalization is correct
         check = self.convert(self.compound(self.denorm(data[:,1:,d])), close[0])
@@ -334,14 +334,10 @@ class PricePredictor(object):
         mask = np.zeros([receptive_field, 1])
         mask[receptive_field-1:, :] = 1
         mask = Variable(torch.from_numpy(mask).float())
-        mask_big = np.zeros([receptive_field, samples_per_tick])
-        mask_big [receptive_field-1:, :] = 1
-        mask_big  = Variable(torch.from_numpy(mask_big).float())
-
+        
         # initial situation
         have_state = False
         actions = np.full((1,ticks_per_run), 'hold')
-
 
         var = np.zeros(np.shape(actions))
         es = np.zeros(np.shape(actions))
@@ -349,7 +345,7 @@ class PricePredictor(object):
         observed_returns = np.zeros(np.shape(actions))
 
         # compute minimal discount factor
-        transaction_cost = 0.00
+        transaction_cost = 0.000
         D = (1+transaction_cost)/(1-transaction_cost)
         print('Discount factor :' , D)
 
@@ -358,12 +354,13 @@ class PricePredictor(object):
         actions_ma10 = self.baseline(target[receptive_field-2:], actions.copy(), 10, D)
         actions_ma20 = self.baseline(target[receptive_field-2:], actions.copy(), 20, D)
         actions_ma50 = self.baseline(target[receptive_field-2:], actions.copy(), 50, D)
+        actions_perfect = self.goal(target[receptive_field-1:], actions.copy(), D , view, receptive_field)
         roi_ma2, profit_ma2 = compute_roi(target[receptive_field-1:], actions_ma2[0,:], transaction_cost)
         roi_ma5, profit_ma5 = compute_roi(target[receptive_field-1:], actions_ma5[0,:], transaction_cost)
         roi_ma10, profit_ma10 = compute_roi(target[receptive_field-1:], actions_ma10[0,:], transaction_cost)
         roi_ma20, profit_ma20 = compute_roi(target[receptive_field-1:], actions_ma20[0,:], transaction_cost)
         roi_ma50, profit_ma50 = compute_roi(target[receptive_field-1:], actions_ma50[0,:], transaction_cost)
-
+        roi_goal, profit_goal = compute_roi(target[receptive_field-1:], actions_perfect[0,:], transaction_cost)
 
 
         t2 = time.time()
@@ -418,7 +415,6 @@ class PricePredictor(object):
             next_return = self.denorm(data[:, tick+receptive_field, d])
             observed_returns[:, tick] = next_return
 
-    
             # choose trading action
             if not have_state:
                 # check when and if there is a profitable sell moment
@@ -442,7 +438,6 @@ class PricePredictor(object):
                         actions[0,tick] = 'sell'
                         print('selling')
 
-            
         # a violation is when the observed return is below the value at risk return
         violations = observed_returns-var
         np.putmask(violations, violations>=0, np.ones(np.shape(observed_returns)))
@@ -492,6 +487,7 @@ class PricePredictor(object):
         f.write('ma10: '+str(roi_ma10)+', '+str(profit_ma10)+'\n')
         f.write('ma20: '+str(roi_ma20)+', '+str(profit_ma20)+'\n')
         f.write('ma50: '+str(roi_ma20)+', '+str(profit_ma50)+'\n')
+        f.write('perfect: '+str(roi_goal)+', '+str(profit_goal)+'\n')
         
         f.close()
 
@@ -524,6 +520,89 @@ class PricePredictor(object):
                 plt.scatter(i+1, target_ma[i+1], c='r')
         # plt.show()
         return actions
+
+    def goal(self, target, actions, D, view, receptive_field):
+        
+        have_state=False
+
+        for tick in range(np.shape(actions)[1]):
+            x0 = target[tick]
+            expected_future = target[tick+1:tick+1+view]
+            # choose trading action
+            if not have_state:
+                # check when and if there is a profitable sell moment
+                t_sell = get_next_or_none(tau for tau, m in enumerate(expected_future[:]) if m > x0*D)
+                
+                if t_sell is not None:
+                    # check if until that sell moment arrives, there is a better buy moment
+                    if (t_sell == 0 or expected_future[0:t_sell].min() >= x0): 
+                        have_state = True
+                        actions[0,tick] = 'buy'
+
+            else:
+                # check if there is a moment when buying a new share is cheaper than keeping this one
+                t_buy = get_next_or_none(tau for tau, m in enumerate(expected_future[-1:]) if m < x0)
+                
+                if t_buy is not None:
+                    # check if until that moment arrives, there is a better sell moment
+                    if (t_buy == 0 or expected_future[0:t_buy].max() <= x0):
+                        have_state = False
+                        actions[0,tick] = 'sell'
+
+        return actions
+
+
+
+
+
+
+    def _make_figs(self, steps = 5, epoch=200):
+        if not os.path.exists('images/'):
+            os.makedirs('images/')
+        self._model._build_model()
+        receptive_field = self.get_receptive_field(self._model, self._config)
+        self._config.input_seq_length = receptive_field
+        self._dataset.prepare_data(self._config)
+        x, y, target = self._dataset.get_validation_set()
+        x=x[:10, :,:]
+        y=y[:10, :,:]
+
+        mask = np.zeros([receptive_field, np.shape(x)[0]])
+        mask[receptive_field-1:, :] = 1
+        mask = Variable(torch.from_numpy(mask).float())
+
+        state = torch.load('saved_models/'+self._config.model_name+'/'+self._config.model_name+str(epoch)+'.pth.tar', map_location='cpu')
+        self._model.net.load_state_dict(state['state_dict'])
+        
+        d = 1
+        for seed in range(100):
+            X = x[:,:receptive_field,:].copy()
+            print('roll-out nr: ', seed)
+            for step in range(steps):
+                np.random.seed(seed)
+                torch.manual_seed(seed)
+                _, test_pars = self.evaluate(X[:, step:step+receptive_field, :], y[:, step:step+receptive_field, :],  mask)
+                if False:#self._config.loss == 'Gaussian':
+                    locs = Variable(torch.from_numpy(np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :]))).float()
+                    logvars = Variable(torch.from_numpy(np.exp(np.einsum('ijk->jik', test_pars[1].detach().numpy()[-1:,:, :])))).float()
+                    Dist = torch.distributions.normal.Normal(locs, logvars, validate_args=None)
+                    test_pred = Dist.sample()
+                else:
+                    test_pred = np.einsum('ijk->jik',test_pars[0].detach().numpy()[-1:,:, :])
+                X = np.concatenate([X, test_pred], axis = 1)
+               
+            preds = self.convert(self.compound(self.denorm(X[:,-steps-1:,d]), dim=1), np.expand_dims(target[receptive_field-2:receptive_field-2+np.shape(X)[0]], 1))
+            plt.plot(preds[9,:], alpha=0.3, c='b')
+
+        tars = self.convert(self.compound(self.denorm(y[:,-steps-1:,d]), dim=1), np.expand_dims(target[receptive_field-2:receptive_field-2+np.shape(X)[0]], 1))
+        plt.plot(tars[9,:], c='r')
+        plt.show()
+
+
+    
+    
+  
+    
 
 
 

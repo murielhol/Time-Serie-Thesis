@@ -1,0 +1,21 @@
+runs: 1
+ticks_per_run: 586
+samples_per_tick: 1
+view: 1
+risk_view: 1
+transaction_cost: 0.0
+T1: 342.0
+T0: 244.0
+ROI: -0.2668707723360191
+profit: -1528.7999999999984
+pihat: 0.5836177474402731
+lr: 1278.2098474817
+z1: nan
+z2: nan
+z3: nan
+es unconditional observed: 0.07167950553479926
+es unconditional expected: 0.0
+es unconditional predicted: 0.0
+es conditional observed: 0.0061409634858760765
+es conditional expected: nan
+es conditional predicted: nan

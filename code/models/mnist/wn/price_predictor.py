@@ -13,7 +13,6 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 
 import matplotlib.pyplot as plt
-from matplotlib import gridspec
 
 
 import pandas as pd 
@@ -29,6 +28,8 @@ import torch.autograd as autograd
 
 import timeit
 
+
+import seaborn as sns
 from model import Model
 
 from models.mnist.mmd import mix_rbf_mmd2_and_ratio
@@ -66,7 +67,7 @@ class PricePredictor(object):
         model.gen_opt.zero_grad()
         # imagine batch size is 10, seq_len is 1000 and 1 channel
         bs = config.batch_size
-        seq_len = config.input_seq_length
+        seq_len = 16
         channels = 28
         x = np.ones([bs, seq_len, channels])
         # for pytorch convs it is [batch_size, channels, width, height]
@@ -106,7 +107,7 @@ class PricePredictor(object):
     
         receptive_field = self.get_receptive_field(self._model, self._config)
         print('--------------------------------------------------------------------')
-        print('NOTE: the receptive field is ', receptive_field, ' and your input is ', self._config.input_seq_length)
+        print('NOTE: the receptive field is ', receptive_field, ' and your input is ', 16)
         print('--------------------------------------------------------------------')
         t2 = time.time()
         print('Finished building the model: ' + str(t2-t1) +' sec \n')
@@ -128,6 +129,7 @@ class PricePredictor(object):
                     shutil.rmtree(os.path.join(root, d))
         
         steps_per_epoch = len(self._dataset._train_y)//self._config.batch_size
+
         ############## initialize all the stuff ##################
 
         t = timeit.default_timer()
@@ -150,8 +152,23 @@ class PricePredictor(object):
                 print('train step: ', train_step)
                 
                 x, _ = self._dataset.get_batch(self._config.batch_size)
+                # m,n = x.shape
+                # out = np.ones((m,2*n),dtype=x.dtype)
+                # out[:,::2] = x
+                # x = out
+
+                # m,n = x.shape
+                # out = np.ones((2*m,n),dtype=x.dtype)
+                # out[::2, :] = x
+
+
+                plt.imshow(x[0,:,:], cmap='gray')
+                plt.Circle((17, 14), 1, color='w')
+                plt.show()
+                
                 y = x[:,1:,:]
                 x = x[:,:-1,:]
+
                 
                 x = np.einsum('ijk->jik', x)
                 y = np.einsum('ijk->jik', y)
@@ -180,7 +197,7 @@ class PricePredictor(object):
                s-t, epoch, self._config.epochs, train_step, steps_per_epoch, loss_sum / train_step, test_loss_sum )
             print(log_line)
         
-            log.append([train_step, loss_sum/train_step, test_loss_sum/train_step])
+            log.append([train_step, loss_sum/train_step, test_loss_sum])
             if epoch%10==0:
                 state = {
                     'epoch': epoch,
@@ -201,12 +218,15 @@ class PricePredictor(object):
             
 
     def _validate(self, epoch=500):
+        sns.set()
         self._model._build_model()
         receptive_field = self.get_receptive_field(self._model, self._config)
         self._config.input_seq_length = receptive_field
         self._dataset.prepare_data(self._config)
         x = self._dataset.get_validation_set()
+        # x = x[:100,:,:]
         y = x.copy()
+
 
         mask = np.zeros([receptive_field, np.shape(x)[0]])
         mask[receptive_field-1:, :] = 1
@@ -228,19 +248,43 @@ class PricePredictor(object):
         tars = y
         preds = X
 
+        pixels_real = np.reshape(0.5*(1+y[:,16:,:]), (1, np.shape(y)[0]*28*12))
+
+        pixels_fake = np.reshape(0.5*(1+X[:,16:,:]), (1, np.shape(X)[0]*28*12))
+        a = np.histogram(pixels_real, bins=50, range = (0,1))
+        a = a[0]/np.sum(a[0])
+        print(np.sum(a))
+
+        # plt.bar(np.arange(0+0.5/len(a), 1+0.5/len(a), 1/len(a)), a, width = 1/len(a)*0.99)
+        # # plt.ylim(-2, 2)
+        # plt.savefig('imagses/mnist_wn_pixeldist_real.pdf')
+        # plt.show()
+        
+        b =  np.histogram(pixels_fake, bins=50, range = (0,1))
+        b = b[0]/np.sum(b[0])
+        plt.bar(np.arange(0+0.5/len(a), 1+0.5/len(a), 1/len(a)), a-b, width = 1/len(a)*0.99)
+        plt.ylim(-.025, .075)
+        plt.savefig('images/mnist_wn_pixeldist.pdf')
+        plt.show()
+
+
+
         sigma_list = [Variable(torch.from_numpy(np.array(s)).float(), requires_grad=False) for s in np.arange(5,10,0.5)]
         _, mmd, that = mix_rbf_mmd2_and_ratio(torch.reshape(Variable(torch.from_numpy(X)).float(), (np.shape(x)[0], np.shape(x)[1]*28)), 
                             torch.reshape(Variable(torch.from_numpy(y)).float(), (np.shape(x)[0], np.shape(x)[1]*28)), sigma_list)
         
-        print('loss per step', loss)
-        print('loss@sum', np.sum(loss))
-        print('mmd pytorch', mmd.item())
 
-        f = open('results_'+self._config.model_name+'.txt', 'w')
+        if not os.path.exists('results/'):
+                    os.makedirs('results/')
+        f = open('results/results_'+self._config.model_name+'.txt', 'w')
+        f.write('epoch: '+str(epoch)+'\n')
         f.write('MMD: '+str(mmd.item())+'\n')
         f.write('MSE1: '+str(loss[0])+'\n')
         f.write('MSEtotal: '+str(np.sum(loss))+'\n')
         f.close()
+        f = open('results/results_'+self._config.model_name+'.txt', 'r')
+        for line in f:
+            print(line)
 
     def _make_figs(self,  epoch=500):
         if not os.path.exists('images/'):
@@ -290,6 +334,7 @@ class PricePredictor(object):
 
         for digit in range(10):
             x = self._dataset.get_digit_set(digit)
+            x = x[:200,:,:]
             print(np.shape(x))
             self._config.batch_size = len(x)
             mask = np.zeros([receptive_field, self._config.batch_size])
@@ -314,6 +359,6 @@ class PricePredictor(object):
         X = np.concatenate( [FakeX, DataX], axis=0)
         Y = tsne(X, 2, 50, 20.0)
 
-        pickle.dump( Y[:len(FakeX),:], open( "FakeY.p", "wb" ) )
-        pickle.dump( Y[len(FakeX):,:], open( "RealY.p", "wb" ) )
+        pickle.dump( Y[:len(FakeX),:], open( "images/FakeY.p", "wb" ) )
+        pickle.dump( Y[len(FakeX):,:], open( "images/RealY.p", "wb" ) )
 

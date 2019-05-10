@@ -348,12 +348,19 @@ class PricePredictor(object):
             KLloss.append(test_kld_loss)
             lowerbound.append(test_nll - kld_weight*test_kld_loss)
 
-        tars = self.convert(self.compound(self.denorm(y[:,-steps:,1]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
-        preds = self.convert(self.compound(self.denorm(X[:,-steps:,1]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
+        d=0
+
+        tars = self.convert(self.compound(self.denorm(y[:,-steps:,d]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
+        preds = self.convert(self.compound(self.denorm(X[:,-steps:,d]), dim=1), np.expand_dims(target[receptive_field-1:receptive_field-1+np.shape(X)[0]], 1))
 
         plt.plot(tars[:,-1])
         plt.plot(preds[:,-1])
         plt.show()
+
+        for i in range(0,1000, 20):
+            plt.plot(tars[i,:])
+            plt.plot(preds[i,:])
+            plt.show()
 
 
         MSE = (preds-tars)**2
@@ -419,7 +426,7 @@ class PricePredictor(object):
         return (compound_returns + 1.0) * seed
 
 
-    def _backtest(self, samples_per_tick=5, view = 1, risk_view= 1, epoch=1000, alpha=5):
+    def _backtest(self, samples_per_tick=200, view = 1, risk_view= 1, epoch=1000, alpha=5):
         t1 = time.time()
         self._dataset.prepare_data(self._config)
         
@@ -556,7 +563,7 @@ class PricePredictor(object):
         z3 = z2_score(observed_returns, violations, es, T1+T0, alpha/100.)
 
         
-        roi, profit = compute_roi(close[receptive_field-1:], actions[0,:], transaction_cost, violations[0,:])
+        roi, profit = compute_roi(close[receptive_field-1:], actions[0,:], transaction_cost)
 
 
         run_seed = np.random.rand()
@@ -590,6 +597,48 @@ class PricePredictor(object):
         for line in f:
             print(line)
         f.close()
+
+    def _make_figs(self, steps = 5, epoch=200):
+        if not os.path.exists('images/'):
+            os.makedirs('images/')
+        self._model._build_model()
+        receptive_field = self.get_receptive_field(self._model, self._config)
+        self._config.input_seq_length = receptive_field
+        self._dataset.prepare_data(self._config)
+        x, y, target = self._dataset.get_validation_set()
+        x=x[:10, :,:]
+        y=y[:10, :,:]
+
+        mask = np.zeros([receptive_field, np.shape(x)[0]])
+        mask[receptive_field-1:, :] = 1
+        mask = Variable(torch.from_numpy(mask).float())
+
+        state = torch.load('saved_models/'+self._config.model_name+'/'+self._config.model_name+str(epoch)+'.pth.tar', map_location='cpu')
+        self._model.gen.load_state_dict(state['state_dict'])
+        
+        d = 0
+        for seed in range(100):
+            X = x[:,:receptive_field,:].copy()
+            print('roll-out nr: ', seed)
+            for step in range(steps):
+                np.random.seed(seed)
+                torch.manual_seed(seed)
+                _, _, _, test_pars = self.evaluate(X[:, step:step+receptive_field, :], y[:, step:step+receptive_field, :],  mask, 1)
+                test_pred = np.einsum('ijk->jik',test_pars.detach().numpy()[-1:,:, :])
+                X = np.concatenate([X, test_pred], axis = 1)
+               
+            preds = self.convert(self.compound(self.denorm(X[:,-steps-1:,d]), dim=1), np.expand_dims(target[receptive_field-2:receptive_field-2+np.shape(X)[0]], 1))
+            plt.plot(preds[4,:], alpha=0.3, c='b')
+
+        tars = self.convert(self.compound(self.denorm(y[:,-steps-1:,d]), dim=1), np.expand_dims(target[receptive_field-2:receptive_field-2+np.shape(X)[0]], 1))
+        plt.plot(tars[4,:], c='r')
+        plt.show()
+
+
+    
+    
+  
+    
 
     
     

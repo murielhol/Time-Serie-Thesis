@@ -295,6 +295,7 @@ class PricePredictor(object):
         self._dataset.prepare_data(self._config)
 
         x = self._dataset.get_validation_set()
+        y = x.copy()
 
         mask = np.zeros([receptive_field, np.shape(x)[0]])
         mask[receptive_field-1:, :] = 1
@@ -317,20 +318,36 @@ class PricePredictor(object):
         _, mmd, that = mix_rbf_mmd2_and_ratio(torch.reshape(Variable(torch.from_numpy(X)).float(), (np.shape(x)[0], np.shape(x)[1]*28)), 
                             torch.reshape(Variable(torch.from_numpy(x)).float(), (np.shape(x)[0], np.shape(x)[1]*28)), sigma_list)
 
-        print('MMD : ', np.mean(mmd.item()),  ' THAT: ', np.mean(that.item()))
-        print('MSE per step: ', MSE)
-        print('MSE sum: ', np.sum(MSE))
+        pixels_real = np.reshape(np.around(0.5*(1+y[:,16:,:]),5), (1, np.shape(y)[0]*28*12))
+        pixels_fake = np.reshape(np.around(0.5*(1+X[:,16:,:]),5), (1, np.shape(X)[0]*28*12))
+        a = np.histogram(pixels_real, bins=50, range = (0,1))
+        b =  np.histogram(pixels_fake, bins=50, range = (0,1))
+        a = a[0]/np.sum(a[0])
+        b = b[0]/np.sum(b[0])
+        plt.bar(np.arange(0+0.5/len(a), 1+0.5/len(a), 1/len(a)), a-b, width = 1/len(a)*0.99)
+        plt.ylim(-0.025, 0.075)
+        plt.savefig('images/mnist_dwn_pixeldist_team.pdf')
+        plt.show()
 
         MSE = np.mean( np.sum((X[:,-12:,:]-x[:,-12:,:])**2, axis=-1) , axis=0)
 
-        print('MSE per step: ', MSE)
-        print('MSE sum: ', np.sum(MSE))
-
-        f = open('results_'+self._config.model_name+'.txt', 'w')
+        if not os.path.exists('results/'):
+            os.makedirs('results/')
+        f = open('results/results_'+self._config.model_name+'.txt', 'w')
+        f.write('epoch: '+str(epoch)+'\n')
         f.write('MMD: '+str(np.mean(mmd.item()))+'\n')
         f.write('MSE@1: '+str(MSE[0])+'\n')
         f.write('MSE@total: '+str(np.sum(MSE))+'\n')
         f.close()
+        f = open('results/results_'+self._config.model_name+'.txt', 'r')
+        for line in f:
+            print(line)
+
+        # dump confg json to keep track of model properties
+        with open('saved_models/'+self._config.model_name+'/config.json', 'w') as fp:
+            json.dump(vars(self._config), fp)
+        with open('saved_models/'+self._config.model_name+'/config.p', 'wb') as fp:
+            pickle.dump( self._config, fp )
 
 
     def _make_figs(self,  epoch=500):

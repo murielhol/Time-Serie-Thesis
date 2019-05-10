@@ -31,10 +31,10 @@ def main(config):
 
     model = PricePredictor(config, dataset)
     if config.validate:
-        model._validate(epoch=200)
-        model._make_figs(epoch=200)
+        model._validate(epoch=220)
+        # model._make_figs(epoch=200)
     elif config.tsne:
-        model._tsne(epoch = 170)
+        model._tsne(epoch = 220)
     else:
         model._train()   
 
@@ -46,11 +46,10 @@ if __name__ == "__main__":
 
     # Data params
     parser.add_argument('--file_path', type=str, default='mnist', required=False, help="Name of the file that you want to train on")
-    parser.add_argument('--model_name', type=str, default='wgan_mnist_team_final', help='Unique name of the model')
+    parser.add_argument('--model_name', type=str, default='wgan_mnist_team_fi', help='Unique name of the model')
 
     # Model params
     parser.add_argument('--num_hidden', type=int, default=128, help='Number of hidden units in the LSTM')
-    parser.add_argument('--embedding', type=int, default=128, help='Number of hidden units in the LSTM')
 
     # Training params
     parser.add_argument('--batch_size', type=int, default=24, help='Number of examples to process in a batch')
@@ -61,7 +60,6 @@ if __name__ == "__main__":
     parser.add_argument('--tensorboard', default=False, help='If to use tensorboard')
 
     # Misc params
-    parser.add_argument('--print_every', type=int, default=500, help='How often to print training progress')
     parser.add_argument('--validate', default=True, help='If only want to validate the stored model')
     parser.add_argument('--tsne', default=False, help='If only want to validate the stored model')
 

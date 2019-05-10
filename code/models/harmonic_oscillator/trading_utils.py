@@ -22,7 +22,9 @@ def expected_shortfall(samples, alpha=5):
     samples: numpy array of size (batch , samples)
     '''
     var = value_at_risk(samples, alpha=alpha)
-    es = np.mean([s for s in samples if s < var])
+    es = np.zeros(np.shape(var))
+    for n in range(np.shape(samples)[0]):
+        es[n] = np.mean([s for s in samples[n,:] if s < var[n]])
     return -1.*es
 
 def unconditional_expected_shortfall(samples, alpha=5):
@@ -32,7 +34,9 @@ def unconditional_expected_shortfall(samples, alpha=5):
     samples: numpy array of size (batch , samples)
     '''
     var = value_at_risk(samples, alpha=alpha)
-    es = np.mean(np.divide([s if s < var else 0 for s in samples], alpha/100.))
+    es = np.zeros(np.shape(var))
+    for n in range(np.shape(samples)[0]):
+        es = np.mean(np.divide([s if s < var[n] else 0 for s in samples[n,:]], alpha/100.))
     return -1.*es
 
 
@@ -59,7 +63,7 @@ def get_next_or_none(iterable):
     except StopIteration:  # there is no tsell
         return None
 
-def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_cost, violations) -> float:
+def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_cost) -> float:
     """
     Given a timeseries and a list of events, compute the return on investment
     Note: only buys once every tick, but sells everything within 1 tick
@@ -75,8 +79,8 @@ def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_
     sold = 0
     roi = []
     profit = 0
-    plt.figure()
-    plt.plot(timeseries, alpha=0.5, c='b')
+    # plt.figure()
+    # plt.plot(timeseries, alpha=0.5, c='b')
     P = []
     R = []
     # for i in range(len(violations)):
@@ -92,23 +96,23 @@ def compute_roi(timeseries: Sequence[float], events: Sequence[str], transaction_
         elif events[i]=='sell':
             plt.scatter(i, timeseries[i], marker='o', s=70 )
             sold = timeseries[i] - timeseries[i]*transaction_cost
-            roi.append( (sold-bought)/bought )
+            # this data can be negative so need to take into accoutn the sign
+            roi.append( (sold-bought)/bought * np.sign(bought) )
             R.append(roi)
             profit += sold
             P.append(profit)
-            print(profit)
 
     # if time is up before able to sell, do not discount
     if sold == 0 and bought>0:
         profit += bought
 
-    plt.show()
-    plt.figure('profit')
-    plt.plot(P)
-    plt.show()
-    plt.figure('ROI')
-    plt.plot(P)
-    plt.show()
+    # plt.show()
+    # plt.figure('profit')
+    # plt.plot(P)
+    # plt.show()
+    # plt.figure('ROI')
+    # plt.plot(P)
+    # plt.show()
 
     return np.sum(roi), profit
 

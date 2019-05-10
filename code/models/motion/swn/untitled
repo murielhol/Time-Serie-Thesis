@@ -1,0 +1,68 @@
+
+            for action in self._dataset.actions:
+                
+                # Evaluate the model on the test batches
+                x, y , _= self._dataset.get_batch_srnn(self._dataset.test_set, action)
+                X = x[:,:receptive_field,:].copy()
+                Y = y[:,:receptive_field,:].copy()
+                
+
+                for step in range(output_len):
+                    srnn_loss, pose  = self.evaluate(X[:, step:step+receptive_field,:], Y, mask_gen[:receptive_field,:8])
+                    pose = np.einsum('ijk->jik',pose[0].detach().cpu().numpy()[-1:,:, :])
+                    X = np.concatenate([X, pose], axis = 1)
+
+                srnn_poses = X[:,-output_len:,:]
+                # Denormalize the output
+                srnn_pred_expmap = self._dataset.revert_output_format(srnn_poses)
+
+                # Save the errors here
+                mean_errors = np.zeros((len(srnn_pred_expmap), srnn_pred_expmap[0].shape[0]))
+
+                # Training is done in exponential map, but the error is reported in
+                # Euler angles, as in previous work.
+                # See https://github.com/asheshjain399/RNNexp/issues/6#issuecomment-247769197
+                N_SEQUENCE_TEST = 8
+                for i in np.arange(N_SEQUENCE_TEST):
+                    eulerchannels_pred = srnn_pred_expmap[i]
+
+                    # Convert from exponential map to Euler angles
+                    for j in np.arange( eulerchannels_pred.shape[0] ):
+                        for k in np.arange(3,97,3):
+                            eulerchannels_pred[j,k:k+3] = self._dataset.rotmat2euler(
+                                                          self._dataset.expmap2rotmat( eulerchannels_pred[j,k:k+3] ))
+
+                    # The global translation (first 3 entries) and global rotation
+                    # (next 3 entries) are also not considered in the error, so the_key
+                    # are set to zero.
+                    # See https://github.com/asheshjain399/RNNexp/issues/6#issuecomment-249404882
+                    gt_i=np.copy(self._dataset.srnn_gts_euler[action][i])
+                    gt_i[:,0:6] = 0
+
+                    # Now compute the l2 error. The following is numpy port of the error
+                    # function provided by Ashesh Jain (in matlab), available at
+                    # https://github.com/asheshjain399/RNNexp/blob/srnn/structural_rnn/CRFProblems/H3.6m/dataParser/Utils/motionGenerationError.m#L40-L54
+                    idx_to_use = np.where( np.std( gt_i, 0 ) > 1e-4 )[0]
+
+                    euc_error = np.power( gt_i[:,idx_to_use] - eulerchannels_pred[:,idx_to_use], 2)
+                    euc_error = np.sum(euc_error, 1)
+                    euc_error = np.sqrt( euc_error )
+                    mean_errors[i,:] = euc_error
+
+                # This is simply the mean error over the N_SEQUENCE_TEST examples
+                mean_mean_errors = np.mean( mean_errors, 0 )
+                # Pretty print of the results for 80, 160, 320, 400, 560 and 1000 ms
+                a = "{0: <16} |".format(action)
+                print(a)
+                f.write(a)
+                f.write('\n')
+
+
+                line = ""
+                for ms in [1,3,7,9,13,24]:
+                    if self._config.input_seq_length - receptive_field >= ms:
+                        line+=" {0:.3f} |".format( mean_mean_errors[ms] )
+                    else:
+                        line+="   n/a |"
+
+                print(line)

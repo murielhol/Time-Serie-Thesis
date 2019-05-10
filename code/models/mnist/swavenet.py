@@ -206,8 +206,8 @@ class Model(nn.Module):
                 z = self.reparameterize(mu, theta);
             else:
                 print('Sampling form the prior...')
-                # z = z_mu
-                z = self.reparameterize(z_mu, z_theta);
+                z = z_mu
+                # z = self.reparameterize(z_mu, z_theta);
             
             #compute KL(q||p)
             tmp = gaussian_kld([mu, theta], [z_mu, z_theta]);
